@@ -1,4 +1,6 @@
 import logging
+from services.ledger import compute_user_summary
+from services.sheets_repo import get_all_rows
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -136,13 +138,35 @@ async def start_flow_days(update: Update, context: ContextTypes.DEFAULT_TYPE, fl
         "owner_id": uid,
     }
 
+    summary = compute_user_summary(str(uid), get_all_rows)
+
     icon = "🏖" if is_ph else ("⭐" if flow == "special" else ("🗂" if action.startswith("claim") else "🕒"))
-    off_prefix = "PH " if is_ph else ("Special " if flow == "special" else "")
+
+    if action == "claimoff":
+        current_bucket = summary.normal_balance
+        bucket_label = "Normal OIL"
+    elif action == "claimphoff":
+        current_bucket = summary.ph_active
+        bucket_label = "Active PH OIL"
+    elif action == "claimspecialoff":
+        current_bucket = summary.special_active
+        bucket_label = "Active Special OIL"
+    elif action == "clockphoff":
+        current_bucket = summary.ph_active
+        bucket_label = "Current Active PH OIL"
+    elif action == "clockspecialoff":
+        current_bucket = summary.special_active
+        bucket_label = "Current Active Special OIL"
+    else:
+        current_bucket = summary.normal_balance
+        bucket_label = "Current Normal OIL"
+
+    verb = "claim" if "claim" in action else "clock"
 
     await reply_quiet(
         update,
-        f"{icon} How many {off_prefix}OIL days do you want to "
-        f"{'clock' if 'clock' in action else 'claim'}? (0.5 to 3, in 0.5 steps)\n"
+        f"{icon} Your current {bucket_label}: {current_bucket:.1f}\n\n"
+        f"How many days do you want to {verb}? (0.5 to 3, in 0.5 steps)\n"
         f"Date limits will be shown next.",
         reply_markup=cancel_keyboard(sid),
     )
