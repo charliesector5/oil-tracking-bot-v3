@@ -30,7 +30,7 @@ async def cmd_help(update, context):
 
 
 async def cmd_ping(update, context):
-    await update.message.reply_text("pong")
+    await update.message.reply_text("pong la, working don't play with me anymore")
 
 
 async def cmd_checksheet(update, context):
@@ -68,32 +68,65 @@ async def cmd_summary(update, context):
         lines.append("")
         lines.append("*Active PH OIL Details*")
         for e in s.ph_active_entries:
-            lines.append(f"- {e.remarks or 'PH'}: {e.qty:.1f} | {e.date} | Exp: {e.expiry or '—'}")
+            lines.append(
+                f"- {e.remarks or 'PH'}: {e.qty:.1f}\n"
+                f"  📅 Date: {e.date}\n"
+                f"  ⏳ Expiry: {e.expiry or '—'}"
+            )
 
     if s.ph_expired_entries:
         lines.append("")
         lines.append("*Expired PH OIL Details*")
         for e in s.ph_expired_entries:
-            lines.append(f"- {e.remarks or 'PH'}: {e.qty:.1f} | {e.date} | Exp: {e.expiry or '—'}")
+            lines.append(
+                f"- {e.remarks or 'PH'}: {e.qty:.1f}\n"
+                f"  📅 Date: {e.date}\n"
+                f"  ⏳ Expiry: {e.expiry or '—'}"
+            )
 
     if s.special_active_entries:
         lines.append("")
         lines.append("*Active Special OIL Details*")
         for e in s.special_active_entries:
-            lines.append(f"- {e.remarks or 'Special'}: {e.qty:.1f} | {e.date} | Exp: {e.expiry or '—'}")
+            lines.append(
+                f"- {e.remarks or 'Special'}: {e.qty:.1f}\n"
+                f"  📅 Date: {e.date}\n"
+                f"  ⏳ Expiry: {e.expiry or '—'}"
+            )
 
     if s.special_expired_entries:
         lines.append("")
         lines.append("*Expired Special OIL Details*")
         for e in s.special_expired_entries:
-            lines.append(f"- {e.remarks or 'Special'}: {e.qty:.1f} | {e.date} | Exp: {e.expiry or '—'}")
+            lines.append(
+                f"- {e.remarks or 'Special'}: {e.qty:.1f}\n"
+                f"  📅 Date: {e.date}\n"
+                f"  ⏳ Expiry: {e.expiry or '—'}"
+            )
+
+    def get_off_type(r):
+        kind = (r.holiday_kind or "").strip().lower()
+        if kind == "special":
+            return "Special"
+        if kind in ("yes", "y", "true", "1"):
+            return "PH"
+        return "Normal"
 
     if recent:
         lines.append("")
         lines.append("*Last 5 Records*")
-        for r in recent:
+        for i, r in enumerate(recent, start=1):
+            is_plus = r.delta >= 0
+            symbol = "🟢" if is_plus else "🔴"
+            operator = "+" if is_plus else "-"
+            amount = abs(r.delta)
+            off_type = get_off_type(r)
+
             lines.append(
-                f"- {r.timestamp} | {r.action} | {r.delta:+.1f} | Final: {r.final_off:.1f} | {r.remarks or '—'}"
+                f"{i}) {symbol} {r.action} [{off_type}]\n"
+                f"   {r.current_off:.1f} {operator} {amount:.1f} = {r.final_off:.1f}\n"
+                f"   📅 {r.application_date or r.timestamp[:10]}\n"
+                f"   📝 {r.remarks or '—'}"
             )
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
