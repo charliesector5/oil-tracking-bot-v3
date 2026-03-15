@@ -560,6 +560,46 @@ async def finalize_single_request(update: Update, context: ContextTypes.DEFAULT_
     is_ph = st["is_ph"]
     is_special = st["action"] in ("clockspecialoff", "claimspecialoff")
 
+    summary = compute_user_summary(str(uid), get_all_rows)
+    current_normal = summary.normal_balance
+    current_ph = summary.ph_active
+    current_special = summary.special_active
+    current_total = summary.total_balance
+
+    projected_normal = current_normal
+    projected_ph = current_ph
+    projected_special = current_special
+
+    if st["action"] == "claimoff":
+        projected_normal = current_normal - days
+    elif st["action"] == "claimphoff":
+        projected_ph = current_ph - days
+    elif st["action"] == "claimspecialoff":
+        projected_special = current_special - days
+    elif st["action"] == "clockoff":
+        projected_normal = current_normal + days
+    elif st["action"] == "clockphoff":
+        projected_ph = current_ph + days
+    elif st["action"] == "clockspecialoff":
+        projected_special = current_special + days
+
+    # Hard stop for PH / Special negative claims
+    if st["action"] == "claimphoff" and days > current_ph:
+        await reply_quiet(
+            update,
+            f"❌ You only have {current_ph:.1f} active PH OIL available.\n"
+            f"Requested claim: {days:.1f}",
+        )
+        return
+
+    if st["action"] == "claimspecialoff" and days > current_special:
+        await reply_quiet(
+            update,
+            f"❌ You only have {current_special:.1f} active Special OIL available.\n"
+            f"Requested claim: {days:.1f}",
+        )
+        return
+
     ok, msg = validate_application_date(st["action"], app_date)
     if not ok:
         await reply_quiet(update, msg)
@@ -607,6 +647,17 @@ async def finalize_single_request(update: Update, context: ContextTypes.DEFAULT_
         "ph_total_after": ph_total_after,
         "special_total_after": special_total_after,
         "admin_msgs": [],
+
+        # split balances for admin preview / approval summary
+        "current_total": current_total,
+        "current_normal": current_normal,
+        "current_ph": current_ph,
+        "current_special": current_special,
+        "projected_total": projected_normal + projected_ph + projected_special,
+        "projected_normal": projected_normal,
+        "projected_ph": projected_ph,
+        "projected_special": projected_special,
+        "warn_negative_normal": projected_normal < 0,
     }
 
     try:
@@ -619,26 +670,44 @@ async def finalize_single_request(update: Update, context: ContextTypes.DEFAULT_
         InlineKeyboardButton("❌ Deny", callback_data=f"deny|{key}"),
     ]])
 
-    label = _label_from_action(st["action"])
-    text = (
-        f"🆕 *{label} Request*\n\n"
-        f"👤 User: {user.full_name} ({uid})\n"
-        f"📅 Days: {days}\n"
-        f"🗓 Application Date: {app_date}\n"
-        f"📝 Reason: {st.get('reason', '') or '—'}\n\n"
-        f"📊 Current Off: {current_off:.1f}\n"
-        f"📈 New Balance: {final:.1f}"
-    )
+    off_type = _off_type_label(st["action"], is_ph, is_special)
+    display_action = _label_from_action(st["action"])
+
+    text_lines = [
+        f"🆕 *{display_action} Request [{off_type}]*",
+        "",
+        f"👤 User: {user.full_name} ({uid})",
+        f"📅 Days: {days:.1f}",
+        f"🗓 Application Date: {app_date}",
+        f"📝 Reason: {st.get('reason', '') or '—'}",
+        "",
+        "*Balances Before*",
+        f"- Total: {current_total:.1f}",
+        f"- Normal: {current_normal:.1f}",
+        f"- PH: {current_ph:.1f}",
+        f"- Special: {current_special:.1f}",
+        "",
+        "*Balances After*",
+        f"- Total: {(projected_normal + projected_ph + projected_special):.1f}",
+        f"- Normal: {projected_normal:.1f}",
+        f"- PH: {projected_ph:.1f}",
+        f"- Special: {projected_special:.1f}",
+    ]
 
     if is_ph and expiry:
-        text += f"\n🏖 PH Expiry: {expiry}"
-        if ph_total_after is not None:
-            text += f"\n🏖 PH Total After: {ph_total_after:.1f}"
+        text_lines.append(f"🏖 PH Expiry: {expiry}")
 
     if is_special and expiry:
-        text += f"\n⭐ Special Expiry: {expiry}"
-        if special_total_after is not None:
-            text += f"\n⭐ Special Total After: {special_total_after:.1f}"
+        text_lines.append(f"⭐ Special Expiry: {expiry}")
+
+    if projected_normal < 0 and st["action"] == "claimoff":
+        text_lines.extend([
+            "",
+            "⚠️ *Warning*",
+            f"Normal OIL will go negative after approval: {projected_normal:.1f}",
+        ])
+
+    text = "\n".join(text_lines)
 
     sent_any = False
     admin_msgs = []
