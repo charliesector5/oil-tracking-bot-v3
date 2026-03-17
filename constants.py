@@ -1,3 +1,11 @@
+START_TEXT = """\
+Sector 5 OIL Helper is online.
+
+Use /help to view the available commands.
+Use /summary to check your own OIL balance.
+Admins may use /overview or /detailedoverview for sector checks.
+"""
+
 HELP_TEXT = """\
 Available commands:
 
