@@ -1,8 +1,3 @@
-APP_NAME = "OIL Tracking Bot v2"
-
-ROOT_OK_TEXT = "✅ Oil Tracking Bot v2 is up."
-HEALTH_OK_TEXT = "✅ Health check passed."
-
 HELP_TEXT = """\
 Available commands:
 
@@ -27,21 +22,21 @@ User Commands
 Admin Commands
 /startadmin - start admin PM session
 /overview - view sector OIL overview
+/detailedoverview - view detailed sector OIL overview
 /adjustoil - manually adjust one user's OIL
 /massadjustoff - mass adjust OIL for all tracked users
 
-Notes
-- For claim commands, the bot will show your current available balance first.
+Important Notes
+- Claim commands will show your current available balance first.
 - PH and Special claims cannot go below available active balance.
 - Normal OIL may go negative and will be flagged to admin where applicable.
 - Use -quit anytime during an active flow to cancel.
-"""
 
-START_TEXT = """\
-OIL Tracking Bot v2 is running.
-
-Current build:
-- baseline deployment ✅
-- flow layer (Phase 2A) in progress
-- ledger layer not rebuilt yet
+Onboarding Notes
+- /newuser is for brand-new onboarding / import only.
+- During PH and Special onboarding, entries must be keyed in using FIFO order.
+- This means you must enter PH / Special from the oldest date to the newest date.
+- In practice, key in the earliest expiry first.
+- If you enter a later date first and then an earlier date later, the bot will reject it.
+- You may use the redo buttons to restart just the PH section or Special section if needed.
 """
