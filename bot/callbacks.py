@@ -323,19 +323,16 @@ async def handle_callback(update, context):
                         st.get("max_date"),
                         "ph",
                     )
-                    text = (
+
+                    await send_group_quiet(
+                        context,
+                        q.message.chat.id,
                         f"❌ This PH date is earlier than the previous PH entry.\n\n"
                         f"Previous PH date: {prev_date}\n"
                         f"New PH date must be {prev_date} or later.\n\n"
-                        f"Please select a valid later date, or choose an option below."
+                        f"Please select a valid later date, or choose an option below.",
+                        reply_markup=recovery_markup,
                     )
-                    try:
-                        await q.edit_message_text(text, reply_markup=recovery_markup)
-                    except Exception:
-                        try:
-                            await q.edit_message_reply_markup(reply_markup=recovery_markup)
-                        except Exception:
-                            pass
                     return
 
                 idx = st["ph_idx"]
@@ -366,19 +363,16 @@ async def handle_callback(update, context):
                         st.get("max_date"),
                         "special",
                     )
-                    text = (
+
+                    await send_group_quiet(
+                        context,
+                        q.message.chat.id,
                         f"❌ This Special date is earlier than the previous Special entry.\n\n"
                         f"Previous Special date: {prev_date}\n"
                         f"New Special date must be {prev_date} or later.\n\n"
-                        f"Please select a valid later date, or choose an option below."
+                        f"Please select a valid later date, or choose an option below.",
+                        reply_markup=recovery_markup,
                     )
-                    try:
-                        await q.edit_message_text(text, reply_markup=recovery_markup)
-                    except Exception:
-                        try:
-                            await q.edit_message_reply_markup(reply_markup=recovery_markup)
-                        except Exception:
-                            pass
                     return
 
                 idx = st["special_idx"]
