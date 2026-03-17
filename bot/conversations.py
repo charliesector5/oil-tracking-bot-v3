@@ -1,7 +1,8 @@
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Dict
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -25,6 +26,16 @@ from services.sheets_repo import (
 )
 
 log = logging.getLogger(__name__)
+
+SG_TZ = ZoneInfo("Asia/Singapore")
+
+
+def sg_now() -> datetime:
+    return datetime.now(SG_TZ)
+
+
+def sg_today():
+    return sg_now().date()
 
 
 def _label_from_action(action: str) -> str:
@@ -831,7 +842,7 @@ async def handle_newuser_apply(update: Update, context: ContextTypes.DEFAULT_TYP
             action_type="IMPORT",
             off_type="NORMAL",
             amount=normal_days,
-            application_date=date.today().strftime("%Y-%m-%d"),
+            application_date=sg_today().strftime("%Y-%m-%d"),
             expiry_date="",
             remarks="Transfer from old record",
             approved_by=approver_name,
@@ -927,8 +938,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         st["days"] = days
         st["stage"] = "awaiting_app_date"
-        st["min_date"] = date.today() - timedelta(days=365)
-        st["max_date"] = date.today() + (
+        st["min_date"] = sg_today() - timedelta(days=365)
+        st["max_date"] = sg_today() + (
             timedelta(days=365) if st["action"] in ("claimoff", "claimphoff", "claimspecialoff") else timedelta(days=0)
         )
 
@@ -937,7 +948,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{bold('📅 Select Application Date:')}\n"
             f"Allowed date range: {st['min_date']} to {st['max_date']}",
             parse_mode="Markdown",
-            reply_markup=build_calendar(st["sid"], date.today(), st["min_date"], st["max_date"]),
+            reply_markup=build_calendar(st["sid"], sg_today(), st["min_date"], st["max_date"]),
         )
         return
 
@@ -992,10 +1003,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        app_date = date.today().strftime("%Y-%m-%d")
+        app_date = sg_today().strftime("%Y-%m-%d")
         expiry = ""
         if amount > 0 and oil_type in ("ph", "special"):
-            expiry = (date.today() + timedelta(days=365)).strftime("%Y-%m-%d")
+            expiry = (sg_today() + timedelta(days=365)).strftime("%Y-%m-%d")
 
         st["amount"] = amount
         st["application_date"] = app_date
@@ -1093,10 +1104,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 elif oil_type == "special" and summary.special_active + amount < 0:
                     skipped.append(target_name)
 
-        app_date = date.today().strftime("%Y-%m-%d")
+        app_date = sg_today().strftime("%Y-%m-%d")
         expiry = ""
         if amount > 0 and oil_type in ("ph", "special"):
-            expiry = (date.today() + timedelta(days=365)).strftime("%Y-%m-%d")
+            expiry = (sg_today() + timedelta(days=365)).strftime("%Y-%m-%d")
 
         st["amount"] = amount
         st["application_date"] = app_date
@@ -1213,15 +1224,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             st["ph_idx"] = 0
             st["stage"] = "ph_date"
-            st["min_date"] = date.today() - timedelta(days=365)
-            st["max_date"] = date.today()
+            st["min_date"] = sg_today() - timedelta(days=365)
+            st["max_date"] = sg_today()
 
             await reply_quiet(
                 update,
                 f"PH Entry 1/{nu['ph_count']} — {bold('Select Application Date')}\n\n"
                 f"⚠️ FIFO approach: enter PH from *oldest date to newest date*.",
                 parse_mode="Markdown",
-                reply_markup=build_calendar(st["sid"], date.today(), st["min_date"], st["max_date"]),
+                reply_markup=build_calendar(st["sid"], sg_today(), st["min_date"], st["max_date"]),
             )
             return
 
@@ -1238,15 +1249,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if idx < nu["ph_count"]:
                 st["ph_idx"] = idx
                 st["stage"] = "ph_date"
-                st["min_date"] = date.today() - timedelta(days=365)
-                st["max_date"] = date.today()
+                st["min_date"] = sg_today() - timedelta(days=365)
+                st["max_date"] = sg_today()
 
                 await reply_quiet(
                     update,
                     f"PH Entry {idx+1}/{nu['ph_count']} — {bold('Select Application Date')}\n\n"
                     f"⚠️ Continue using FIFO order: next date must be the same or later than the previous PH date.",
                     parse_mode="Markdown",
-                    reply_markup=build_calendar(st["sid"], date.today(), st["min_date"], st["max_date"]),
+                    reply_markup=build_calendar(st["sid"], sg_today(), st["min_date"], st["max_date"]),
                 )
             else:
                 st["stage"] = "special_ask_count"
@@ -1274,15 +1285,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             st["special_idx"] = 0
             st["stage"] = "special_date"
-            st["min_date"] = date.today() - timedelta(days=365)
-            st["max_date"] = date.today()
+            st["min_date"] = sg_today() - timedelta(days=365)
+            st["max_date"] = sg_today()
 
             await reply_quiet(
                 update,
                 f"Special Entry 1/{nu['special_count']} — {bold('Select Application Date')}\n\n"
                 f"⚠️ FIFO approach: enter Special from *oldest date to newest date*.",
                 parse_mode="Markdown",
-                reply_markup=build_calendar(st["sid"], date.today(), st["min_date"], st["max_date"]),
+                reply_markup=build_calendar(st["sid"], sg_today(), st["min_date"], st["max_date"]),
             )
             return
 
@@ -1299,15 +1310,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if idx < nu["special_count"]:
                 st["special_idx"] = idx
                 st["stage"] = "special_date"
-                st["min_date"] = date.today() - timedelta(days=365)
-                st["max_date"] = date.today()
+                st["min_date"] = sg_today() - timedelta(days=365)
+                st["max_date"] = sg_today()
 
                 await reply_quiet(
                     update,
                     f"Special Entry {idx+1}/{nu['special_count']} — {bold('Select Application Date')}\n\n"
                     f"⚠️ Continue using FIFO order: next date must be the same or later than the previous Special date.",
                     parse_mode="Markdown",
-                    reply_markup=build_calendar(st["sid"], date.today(), st["min_date"], st["max_date"]),
+                    reply_markup=build_calendar(st["sid"], sg_today(), st["min_date"], st["max_date"]),
                 )
             else:
                 await newuser_review(update, context, st)
