@@ -1,10 +1,7 @@
-START_TEXT = """\
-Sector 5 OIL Helper is online.
+APP_NAME = "OIL Tracking Bot v3"
 
-Use /help to view the available commands.
-Use /summary to check your own OIL balance.
-Admins may use /overview or /detailedoverview for sector checks.
-"""
+ROOT_OK_TEXT = "✅ Oil Tracking Bot v3 is up."
+HEALTH_OK_TEXT = "✅ Health check passed."
 
 HELP_TEXT = """\
 Available commands:
@@ -47,4 +44,14 @@ Onboarding Notes
 - In practice, key in the earliest expiry first.
 - If you enter a later date first and then an earlier date later, the bot will reject it.
 - You may use the redo buttons to restart just the PH section or Special section if needed.
+"""
+
+START_TEXT = """\
+OIL Tracking Bot v3 is running.
+
+Current build:
+- V3 ledger + balances model ✅
+- normal / PH / Special request flow ✅
+- admin tools and overview flow ✅
+- onboarding with FIFO safeguards ✅
 """
