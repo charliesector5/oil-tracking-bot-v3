@@ -1,6 +1,6 @@
 import logging
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from uuid import uuid4
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -86,6 +86,15 @@ def build_adjust_user_keyboard(session_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+def build_redo_section_keyboard(session_id: str, section: str) -> InlineKeyboardMarkup:
+    if section == "ph":
+        redo_btn = InlineKeyboardButton("🔁 Redo PH Off", callback_data=f"redo_ph|{session_id}")
+    else:
+        redo_btn = InlineKeyboardButton("🔁 Redo Special Off", callback_data=f"redo_special|{session_id}")
+    cancel_btn = InlineKeyboardButton("❌ Cancel", callback_data=f"cancel|{session_id}")
+    return InlineKeyboardMarkup([[redo_btn, cancel_btn]])
+
+
 async def _is_admin_in_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int) -> bool:
     try:
         admins = await context.bot.get_chat_administrators(chat_id)
@@ -144,6 +153,54 @@ def _format_massadjust_preview(payload: dict) -> str:
         lines.append("")
         lines.append(f"⚠️ Will skip {len(payload['skipped'])} user(s) due to insufficient {payload['oil_type'].title()} balance.")
     return "\n".join(lines)
+
+
+def _onboarding_intro_text() -> str:
+    return (
+        "🆕 *Onboarding: Import Old Records*\n\n"
+        "1) How many *normal OIL* days to import? (e.g. 7.5 or 0 if none)\n\n"
+        "⚠️ *Important for PH / Special import*\n"
+        "This onboarding uses a *FIFO approach*.\n"
+        "Please key in *PH* and *Special* entries from the *oldest date to the newest date*.\n"
+        "In practice, enter the entry with the *earliest expiry first*.\n"
+        "If you key in a later date first and then an earlier date later, the bot will reject it."
+    )
+
+
+def _ph_prompt_count() -> str:
+    return (
+        "How many PH entries do you want to add? (0–10)\n\n"
+        "⚠️ *FIFO rule*\n"
+        "Please key in PH entries from *oldest date to newest date*.\n"
+        "That means the *earliest expiry* should be entered first."
+    )
+
+
+def _special_prompt_count() -> str:
+    return (
+        "How many Special entries do you want to add? (0–10)\n\n"
+        "⚠️ *FIFO rule*\n"
+        "Please key in Special entries from *oldest date to newest date*.\n"
+        "That means the *earliest expiry* should be entered first."
+    )
+
+
+def _validate_fifo_date(existing_entries: list[dict], new_date_str: str) -> tuple[bool, str]:
+    if not existing_entries:
+        return True, ""
+    prev_date_str = existing_entries[-1].get("date", "")
+    try:
+        prev_date = datetime.strptime(prev_date_str, "%Y-%m-%d").date()
+        new_date = datetime.strptime(new_date_str, "%Y-%m-%d").date()
+    except Exception:
+        return True, ""
+
+    if new_date < prev_date:
+        return (
+            False,
+            prev_date_str,
+        )
+    return True, ""
 
 
 async def apply_adjustoil_payload(context: ContextTypes.DEFAULT_TYPE, payload: dict):
@@ -263,6 +320,7 @@ def build_admin_summary_text(payload: dict, approved: bool, approver_name: str, 
             f"Onboarding — {payload['user_name']} ({payload['user_id']})",
             f"Normal OIL: {payload.get('normal_days', 0)}",
             f"PH entries: {len(payload.get('ph_entries', []))}",
+            f"Special entries: {len(payload.get('special_entries', []))}",
             f"Approved by: {approver_name}",
         ])
 
@@ -465,14 +523,14 @@ async def cmd_newuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "newuser": {
             "normal_days": None,
             "ph_entries": [],
+            "special_entries": [],
         },
         "owner_id": uid,
     }
 
     await reply_quiet(
         update,
-        "🆕 *Onboarding: Import Old Records*\n\n"
-        "1) How many *normal OIL* days to import? (e.g. 7.5 or 0 if none)",
+        _onboarding_intro_text(),
         parse_mode="Markdown",
         reply_markup=cancel_keyboard(sid),
     )
@@ -652,6 +710,9 @@ async def newuser_review(update: Update, context: ContextTypes.DEFAULT_TYPE, st:
     lines.append(f"PH entries: {len(nu['ph_entries'])}")
     for e in nu["ph_entries"]:
         lines.append(f"  • {e['date']} — {e['reason']}")
+    lines.append(f"Special entries: {len(nu['special_entries'])}")
+    for e in nu["special_entries"]:
+        lines.append(f"  • {e['date']} — {e['reason']}")
 
     key = str(uuid4())[:12]
     payload = {
@@ -661,6 +722,7 @@ async def newuser_review(update: Update, context: ContextTypes.DEFAULT_TYPE, st:
         "user_name": uname,
         "normal_days": float(nu["normal_days"] or 0.0),
         "ph_entries": nu["ph_entries"],
+        "special_entries": nu["special_entries"],
         "admin_msgs": [],
     }
 
@@ -754,6 +816,7 @@ async def handle_newuser_apply(update: Update, context: ContextTypes.DEFAULT_TYP
     uname = payload["user_name"]
     normal_days = float(payload.get("normal_days", 0.0))
     ph_entries = payload.get("ph_entries", [])
+    special_entries = payload.get("special_entries", [])
 
     if not approved:
         await send_group_quiet(context, gid, f"❌ Onboarding import for {uname} denied by {approver_name}.")
@@ -793,6 +856,32 @@ async def handle_newuser_apply(update: Update, context: ContextTypes.DEFAULT_TYP
             name=uname,
             action_type="IMPORT",
             off_type="PH",
+            amount=1.0,
+            application_date=dstr,
+            expiry_date=expiry,
+            remarks=reason,
+            approved_by=approver_name,
+            source="USER",
+        )
+
+    for entry in special_entries:
+        dstr = entry.get("date")
+        reason = entry.get("reason", "")
+        if not dstr:
+            continue
+
+        expiry = ""
+        try:
+            d = datetime.strptime(dstr, "%Y-%m-%d").date()
+            expiry = (d + timedelta(days=365)).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+        append_ledger_row(
+            telegram_id=uid,
+            name=uname,
+            action_type="IMPORT",
+            off_type="SPECIAL",
             amount=1.0,
             application_date=dstr,
             expiry_date=expiry,
@@ -1096,7 +1185,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             st["stage"] = "ph_ask_count"
             await reply_quiet(
                 update,
-                "How many PH entries do you want to add? (0–10)",
+                _ph_prompt_count(),
+                parse_mode="Markdown",
                 reply_markup=cancel_keyboard(st["sid"]),
             )
             return
@@ -1112,7 +1202,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             nu["ph_count"] = cnt
             if cnt == 0:
-                await newuser_review(update, context, st)
+                st["stage"] = "special_ask_count"
+                await reply_quiet(
+                    update,
+                    _special_prompt_count(),
+                    parse_mode="Markdown",
+                    reply_markup=cancel_keyboard(st["sid"]),
+                )
                 return
 
             st["ph_idx"] = 0
@@ -1122,7 +1218,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await reply_quiet(
                 update,
-                f"PH Entry 1/{nu['ph_count']} — {bold('Select Application Date')}",
+                f"PH Entry 1/{nu['ph_count']} — {bold('Select Application Date')}\n\n"
+                f"⚠️ FIFO approach: enter PH from *oldest date to newest date*.",
                 parse_mode="Markdown",
                 reply_markup=build_calendar(st["sid"], date.today(), st["min_date"], st["max_date"]),
             )
@@ -1146,7 +1243,69 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 await reply_quiet(
                     update,
-                    f"PH Entry {idx+1}/{nu['ph_count']} — {bold('Select Application Date')}",
+                    f"PH Entry {idx+1}/{nu['ph_count']} — {bold('Select Application Date')}\n\n"
+                    f"⚠️ Continue using FIFO order: next date must be the same or later than the previous PH date.",
+                    parse_mode="Markdown",
+                    reply_markup=build_calendar(st["sid"], date.today(), st["min_date"], st["max_date"]),
+                )
+            else:
+                st["stage"] = "special_ask_count"
+                await reply_quiet(
+                    update,
+                    _special_prompt_count(),
+                    parse_mode="Markdown",
+                    reply_markup=cancel_keyboard(st["sid"]),
+                )
+            return
+
+        if st["stage"] == "special_ask_count":
+            try:
+                cnt = int(text)
+                if cnt < 0 or cnt > 10:
+                    raise ValueError()
+            except ValueError:
+                await reply_quiet(update, "Enter an integer between 0 and 10.", reply_markup=cancel_keyboard(st["sid"]))
+                return
+
+            nu["special_count"] = cnt
+            if cnt == 0:
+                await newuser_review(update, context, st)
+                return
+
+            st["special_idx"] = 0
+            st["stage"] = "special_date"
+            st["min_date"] = date.today() - timedelta(days=365)
+            st["max_date"] = date.today()
+
+            await reply_quiet(
+                update,
+                f"Special Entry 1/{nu['special_count']} — {bold('Select Application Date')}\n\n"
+                f"⚠️ FIFO approach: enter Special from *oldest date to newest date*.",
+                parse_mode="Markdown",
+                reply_markup=build_calendar(st["sid"], date.today(), st["min_date"], st["max_date"]),
+            )
+            return
+
+        if st["stage"] == "special_reason":
+            idx = st["special_idx"]
+            txt = text.strip()
+            if not txt or txt.lower() == "nil":
+                await reply_quiet(update, "❌ Special name is required.", reply_markup=cancel_keyboard(st["sid"]))
+                return
+
+            nu["special_entries"][idx]["reason"] = txt[:80]
+            idx += 1
+
+            if idx < nu["special_count"]:
+                st["special_idx"] = idx
+                st["stage"] = "special_date"
+                st["min_date"] = date.today() - timedelta(days=365)
+                st["max_date"] = date.today()
+
+                await reply_quiet(
+                    update,
+                    f"Special Entry {idx+1}/{nu['special_count']} — {bold('Select Application Date')}\n\n"
+                    f"⚠️ Continue using FIFO order: next date must be the same or later than the previous Special date.",
                     parse_mode="Markdown",
                     reply_markup=build_calendar(st["sid"], date.today(), st["min_date"], st["max_date"]),
                 )
@@ -1192,6 +1351,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         nu = st["newuser"]
+        is_ok, prev_date = _validate_fifo_date(nu["ph_entries"], d)
+        if not is_ok:
+            await reply_quiet(
+                update,
+                f"❌ This PH date is earlier than the previous PH entry.\n\n"
+                f"Previous PH date: {prev_date}\n"
+                f"New PH date must be {prev_date} or later.\n\n"
+                f"⚠️ FIFO approach requires oldest to newest order.",
+                reply_markup=build_redo_section_keyboard(st["sid"], "ph"),
+            )
+            return
+
         idx = st.get("ph_idx", 0)
         nu["ph_entries"].append({"date": d, "reason": None})
         st["stage"] = "ph_reason"
@@ -1202,3 +1373,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=cancel_keyboard(st["sid"]),
         )
+        return
+
+    if st.get("stage") == "special_date_manual":
+        d = parse_date_yyyy_mm_dd(text)
+        if not d:
+            await reply_quiet(update, "Invalid date. Please type YYYY-MM-DD.", reply_markup=cancel_keyboard(st["sid"]))
+            return
+
+        ok, msg = validate_application_date("newuser_ph", d)
+        if not ok:
+            await reply_quiet(update, msg, reply_markup=cancel_keyboard(st["sid"]))
+            return
+
+        nu = st["newuser"]
+        is_ok, prev_date = _validate_fifo_date(nu["special_entries"], d)
+        if not is_ok:
+            await reply_quiet(
+                update,
+                f"❌ This Special date is earlier than the previous Special entry.\n\n"
+                f"Previous Special date: {prev_date}\n"
+                f"New Special date must be {prev_date} or later.\n\n"
+                f"⚠️ FIFO approach requires oldest to newest order.",
+                reply_markup=build_redo_section_keyboard(st["sid"], "special"),
+            )
+            return
+
+        idx = st.get("special_idx", 0)
+        nu["special_entries"].append({"date": d, "reason": None})
+        st["stage"] = "special_reason"
+
+        await reply_quiet(
+            update,
+            f"Special Entry {idx+1}/{nu['special_count']} — Enter {bold('Special name')}:",
+            parse_mode="Markdown",
+            reply_markup=cancel_keyboard(st["sid"]),
+        )
+        return
