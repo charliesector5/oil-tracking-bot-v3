@@ -33,21 +33,6 @@ def _validate_fifo_date(existing_entries: list[dict], new_date_str: str) -> tupl
     return True, ""
 
 
-def _current_calendar_anchor(st, fallback: str) -> date:
-    """
-    Keep the user on the month they are currently working in.
-    """
-    try:
-        if st and st.get("min_date"):
-            return st["min_date"] if False else datetime.strptime(fallback, "%Y-%m-%d").date()
-    except Exception:
-        pass
-    try:
-        return datetime.strptime(fallback, "%Y-%m-%d").date()
-    except Exception:
-        return date.today()
-
-
 async def handle_callback(update, context):
     if not update.callback_query:
         return
@@ -250,15 +235,7 @@ async def handle_callback(update, context):
 
         min_d = st.get("min_date")
         max_d = st.get("max_date")
-
-        if st.get("flow") == "newuser" and st.get("stage") == "ph_date":
-            reply_markup = build_calendar(sid, target, min_d, max_d)
-        elif st.get("flow") == "newuser" and st.get("stage") == "special_date":
-            reply_markup = build_calendar(sid, target, min_d, max_d)
-        else:
-            reply_markup = build_calendar(sid, target, min_d, max_d)
-
-        await q.edit_message_reply_markup(reply_markup=reply_markup)
+        await q.edit_message_reply_markup(reply_markup=build_calendar(sid, target, min_d, max_d))
         return
 
     if kind == "manual":
