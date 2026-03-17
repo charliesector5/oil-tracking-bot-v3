@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Callable, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from services.sheets_repo import (
     clear_balances_data,
@@ -10,6 +11,16 @@ from services.sheets_repo import (
     list_all_known_users,
     upsert_balance_row,
 )
+
+SG_TZ = ZoneInfo("Asia/Singapore")
+
+
+def sg_now() -> datetime:
+    return datetime.now(SG_TZ)
+
+
+def sg_today() -> date:
+    return sg_now().date()
 
 
 def _safe_float(value) -> float:
@@ -39,7 +50,7 @@ def _safe_timestamp_date(value: str) -> Optional[date]:
 
 
 def _event_ref_date(application_date: str, timestamp: str) -> date:
-    return _safe_date(application_date) or _safe_timestamp_date(timestamp) or date.today()
+    return _safe_date(application_date) or _safe_timestamp_date(timestamp) or sg_today()
 
 
 def _holiday_kind_from_off_type(off_type: str) -> str:
@@ -197,7 +208,6 @@ def _allocate_from_grants(
         left -= take
 
     if left > 0:
-        # fallback: consume any remaining grants if the dataset is historically messy
         for g in grants:
             if left <= 0:
                 break
@@ -348,7 +358,7 @@ def compute_user_summary(
         )
 
     normal_balance, ph_grants, special_grants, history_rows = _build_user_state(events)
-    today = date.today()
+    today = sg_today()
 
     ph_active = _active_total(ph_grants, today)
     ph_expired = _expired_total(ph_grants, today)
@@ -435,7 +445,6 @@ def rebuild_all_balances(
     users = list_all_known_users()
     rebuilt: List[UserSummary] = []
 
-    # if balances is empty and users list comes back empty, derive from ledger directly
     if not users:
         events = _parse_ledger_events(get_all_rows_fn)
         seen = set()
