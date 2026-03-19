@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from services.sheets_repo import (
+    append_ledger_row,
     clear_balances_data,
     get_all_rows,
     list_all_known_users,
@@ -137,6 +138,15 @@ class UserSummary:
     special_expired_entries: List[EntryDetail]
     last_action: str
     last_application_date: str
+
+
+@dataclass
+class CleanupResult:
+    users_affected: int
+    ph_cleaned: float
+    special_cleaned: float
+    rows_written: int
+    affected_users: List[str]
 
 
 def _parse_ledger_events(get_all_rows_fn: Callable[[], List[List[str]]]) -> List[LedgerEvent]:
@@ -459,3 +469,70 @@ def rebuild_all_balances(
 
     rebuilt.sort(key=lambda x: x.user_name.lower())
     return rebuilt
+
+
+def cleanup_expired_off(
+    admin_name: str,
+    get_all_rows_fn: Callable[[], List[List[str]]] = get_all_rows,
+    remarks: str = "Expired off cleanup",
+) -> CleanupResult:
+    summaries = compute_overview(get_all_rows_fn)
+
+    users_affected = 0
+    ph_cleaned = 0.0
+    special_cleaned = 0.0
+    rows_written = 0
+    affected_users: List[str] = []
+    today_str = sg_today().strftime("%Y-%m-%d")
+
+    for s in summaries:
+        wrote_for_user = False
+
+        if s.ph_expired > 0:
+            append_ledger_row(
+                telegram_id=s.user_id,
+                name=s.user_name,
+                action_type="EXPIRE_CLEANUP",
+                off_type="PH",
+                amount=-float(s.ph_expired),
+                application_date=today_str,
+                expiry_date="",
+                remarks=remarks,
+                approved_by=admin_name,
+                source="ADMIN",
+            )
+            ph_cleaned += float(s.ph_expired)
+            rows_written += 1
+            wrote_for_user = True
+
+        if s.special_expired > 0:
+            append_ledger_row(
+                telegram_id=s.user_id,
+                name=s.user_name,
+                action_type="EXPIRE_CLEANUP",
+                off_type="SPECIAL",
+                amount=-float(s.special_expired),
+                application_date=today_str,
+                expiry_date="",
+                remarks=remarks,
+                approved_by=admin_name,
+                source="ADMIN",
+            )
+            special_cleaned += float(s.special_expired)
+            rows_written += 1
+            wrote_for_user = True
+
+        if wrote_for_user:
+            users_affected += 1
+            affected_users.append(s.user_name)
+
+    if rows_written > 0:
+        rebuild_all_balances(get_all_rows_fn)
+
+    return CleanupResult(
+        users_affected=users_affected,
+        ph_cleaned=ph_cleaned,
+        special_cleaned=special_cleaned,
+        rows_written=rows_written,
+        affected_users=affected_users,
+    )
