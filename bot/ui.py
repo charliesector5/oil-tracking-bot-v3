@@ -149,12 +149,14 @@ def build_calendar_with_recovery(
 
     cancel_btn = InlineKeyboardButton("❌ Cancel", callback_data=f"cancel|{sid}")
 
-    if kb.inline_keyboard:
-        kb.inline_keyboard[-1] = [redo_btn, cancel_btn]
-    else:
-        kb.inline_keyboard.append([redo_btn, cancel_btn])
+    rows = [list(row) for row in kb.inline_keyboard]
 
-    return kb
+    if rows:
+        rows[-1] = [redo_btn, cancel_btn]
+    else:
+        rows.append([redo_btn, cancel_btn])
+
+    return InlineKeyboardMarkup(rows)
 
 
 def validate_half_step(value: float) -> bool:
