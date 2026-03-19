@@ -16,6 +16,7 @@ from bot.conversations import (
 )
 from constants import HELP_TEXT, START_TEXT
 from services.ledger import (
+    cleanup_expired_off,
     compute_overview,
     compute_user_summary,
     get_user_last_records,
@@ -177,6 +178,49 @@ async def cmd_rebuildbalances(update, context):
         lines.extend([
             "",
             f"⚠️ Users with negative normal balance: {len(negative_users)}",
+            preview,
+        ])
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_cleanupexpired(update, context):
+    chat = update.effective_chat
+    if not chat or chat.type == "private":
+        await update.message.reply_text("Please use /cleanupexpired inside the group.")
+        return
+
+    is_admin = await _is_admin_in_chat(context, chat.id, update.effective_user.id)
+    if not is_admin:
+        await update.message.reply_text("❌ Only group admins can use /cleanupexpired.")
+        return
+
+    try:
+        result = cleanup_expired_off(update.effective_user.full_name, get_all_rows)
+    except Exception as exc:
+        await update.message.reply_text(f"❌ Expired cleanup failed: {exc}")
+        return
+
+    if result.rows_written == 0:
+        await update.message.reply_text("✅ No expired PH or Special off found to clean.")
+        return
+
+    lines = [
+        "✅ *Expired off cleanup completed*",
+        "",
+        f"👥 Users affected: {result.users_affected}",
+        f"🏖 PH cleaned: {result.ph_cleaned:.1f}",
+        f"⭐ Special cleaned: {result.special_cleaned:.1f}",
+        f"🧾 Ledger rows written: {result.rows_written}",
+    ]
+
+    if result.affected_users:
+        preview = ", ".join(result.affected_users[:10])
+        if len(result.affected_users) > 10:
+            preview += ", ..."
+        lines.extend([
+            "",
+            "*Affected users*",
             preview,
         ])
 
@@ -359,6 +403,7 @@ def register_handlers(application):
     application.add_handler(CommandHandler("checksheet", cmd_checksheet))
     application.add_handler(CommandHandler("sheetinfo", cmd_sheetinfo))
     application.add_handler(CommandHandler("rebuildbalances", cmd_rebuildbalances))
+    application.add_handler(CommandHandler("cleanupexpired", cmd_cleanupexpired))
 
     application.add_handler(CommandHandler("startadmin", cmd_startadmin))
     application.add_handler(CommandHandler("history", cmd_history))
