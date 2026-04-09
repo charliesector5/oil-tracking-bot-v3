@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+import holidays
 from typing import Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,22 @@ def sg_now() -> datetime:
 
 def sg_today() -> date:
     return sg_now().date()
+
+DOS_CONVERSION_THRESHOLD = 3
+DOS_CONVERSION_DAYS = 1.0
+
+
+def is_sg_public_holiday(day: date) -> bool:
+    sg_holidays = holidays.country_holidays("SG", years=day.year)
+    return day in sg_holidays
+
+
+def dos_points_for_date(day: date) -> int:
+    if is_sg_public_holiday(day):
+        return 3
+    if day.weekday() >= 5: 
+        return 2
+    return 1
 
 
 def _safe_float(value) -> float:
@@ -132,6 +149,7 @@ class UserSummary:
     ph_expired: float
     special_active: float
     special_expired: float
+    dos_points: float
     ph_active_entries: List[EntryDetail]
     ph_expired_entries: List[EntryDetail]
     special_active_entries: List[EntryDetail]
@@ -272,6 +290,7 @@ def _build_user_state(events: List[LedgerEvent]):
     normal_balance = 0.0
     ph_grants: List[Dict] = []
     special_grants: List[Dict] = []
+    dos_points_balance = 0.0
     history_rows: List[LedgerRow] = []
 
     for e in events:
@@ -282,6 +301,7 @@ def _build_user_state(events: List[LedgerEvent]):
             + _active_total(ph_grants, ref_date)
             + _active_total(special_grants, ref_date)
         )
+        before_dos = dos_points_balance
 
         if e.off_type == "NORMAL":
             normal_balance += e.amount
@@ -314,11 +334,18 @@ def _build_user_state(events: List[LedgerEvent]):
                 mode = "expired" if e.action_type == "EXPIRE_CLEANUP" else "active"
                 _allocate_from_grants(special_grants, abs(e.amount), ref_date, mode=mode)
 
+        elif e.off_type == "DOS":
+            dos_points_balance += e.amount
+
         after_total = (
             normal_balance
             + _active_total(ph_grants, ref_date)
             + _active_total(special_grants, ref_date)
         )
+        after_dos = dos_points_balance
+
+        row_current = before_dos if e.off_type == "DOS" else before_total
+        row_final = after_dos if e.off_type == "DOS" else after_total
 
         history_rows.append(
             LedgerRow(
@@ -328,9 +355,9 @@ def _build_user_state(events: List[LedgerEvent]):
                 action=_display_action(e.action_type),
                 action_type=e.action_type,
                 off_type=e.off_type,
-                current_off=before_total,
+                current_off=row_current,
                 delta=e.amount,
-                final_off=after_total,
+                final_off=row_final,
                 approved_by=e.approved_by,
                 application_date=e.application_date,
                 remarks=e.remarks,
@@ -340,7 +367,7 @@ def _build_user_state(events: List[LedgerEvent]):
             )
         )
 
-    return normal_balance, ph_grants, special_grants, history_rows
+    return normal_balance, ph_grants, special_grants, dos_points_balance, history_rows
 
 
 def compute_user_summary(
@@ -359,6 +386,7 @@ def compute_user_summary(
             ph_expired=0.0,
             special_active=0.0,
             special_expired=0.0,
+            dos_points=0.0,
             ph_active_entries=[],
             ph_expired_entries=[],
             special_active_entries=[],
@@ -367,7 +395,7 @@ def compute_user_summary(
             last_application_date="",
         )
 
-    normal_balance, ph_grants, special_grants, history_rows = _build_user_state(events)
+    normal_balance, ph_grants, special_grants, dos_points_balance, history_rows = _build_user_state(events)
     today = sg_today()
 
     ph_active = _active_total(ph_grants, today)
@@ -387,6 +415,7 @@ def compute_user_summary(
         ph_expired=ph_expired,
         special_active=special_active,
         special_expired=special_expired,
+        dos_points=dos_points_balance,
         ph_active_entries=_grant_details(ph_grants, today, expired=False),
         ph_expired_entries=_grant_details(ph_grants, today, expired=True),
         special_active_entries=_grant_details(special_grants, today, expired=False),
@@ -425,6 +454,67 @@ def get_user_last_records(
     _, _, _, history_rows = _build_user_state(events)
     return history_rows[-limit:]
 
+def award_dos_for_date(
+    telegram_id: str,
+    name: str,
+    work_date: str,
+    approved_by: str,
+    source: str = "ADMIN",
+    remarks: str = "",
+    get_all_rows_fn: Callable[[], List[List[str]]] = get_all_rows,
+) -> UserSummary:
+    work_day = _safe_date(work_date)
+    if not work_day:
+        raise ValueError("work_date must be YYYY-MM-DD")
+
+    points = float(dos_points_for_date(work_day))
+    reason = remarks or f"DOS earned on {work_date}"
+
+    append_ledger_row(
+        telegram_id=telegram_id,
+        name=name,
+        action_type="ADJUST",
+        off_type="DOS",
+        amount=points,
+        application_date=work_date,
+        expiry_date="",
+        remarks=reason,
+        approved_by=approved_by,
+        source=source,
+    )
+
+    summary = compute_user_summary(str(telegram_id), get_all_rows_fn)
+    conversions = int(summary.dos_points // DOS_CONVERSION_THRESHOLD)
+
+    for _ in range(conversions):
+        append_ledger_row(
+            telegram_id=telegram_id,
+            name=name,
+            action_type="ADJUST",
+            off_type="DOS",
+            amount=-float(DOS_CONVERSION_THRESHOLD),
+            application_date=work_date,
+            expiry_date="",
+            remarks="DOS auto-conversion: -3 points",
+            approved_by=approved_by,
+            source=source,
+        )
+
+        append_ledger_row(
+            telegram_id=telegram_id,
+            name=name,
+            action_type="ADJUST",
+            off_type="NORMAL",
+            amount=+float(DOS_CONVERSION_DAYS),
+            application_date=work_date,
+            expiry_date="",
+            remarks="DOS auto-conversion: +1.0 normal OIL",
+            approved_by=approved_by,
+            source=source,
+        )
+
+    return rebuild_user_balance(str(telegram_id), get_all_rows_fn)
+
 
 def rebuild_user_balance(
     user_id: str,
@@ -442,6 +532,7 @@ def rebuild_user_balance(
         expired_ph_off=summary.ph_expired,
         active_special_off=summary.special_active,
         expired_special_off=summary.special_expired,
+        dos_points=summary.dos_points,
         available_total=summary.total_balance,
     )
     return summary

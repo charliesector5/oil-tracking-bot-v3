@@ -239,7 +239,7 @@ async def handle_callback(update, context):
         return
 
     if kind == "manual":
-        if st["flow"] in ("normal", "ph", "special") and st["stage"] == "awaiting_app_date":
+        if st["flow"] in ("normal", "ph", "special", "dos") and st["stage"] == "awaiting_app_date":
             st["stage"] = "awaiting_app_date_manual"
             await q.edit_message_text("⌨️ Type the application date as YYYY-MM-DD.", reply_markup=cancel_keyboard(sid))
             return
@@ -267,7 +267,7 @@ async def handle_callback(update, context):
     if kind == "cal":
         chosen = parts[2]
 
-        if st["flow"] in ("normal", "ph", "special") and st["stage"] == "awaiting_app_date":
+        if st["flow"] in ("normal", "ph", "special", "dos") and st["stage"] == "awaiting_app_date":
             ok, msg = validate_application_date(st.get("action", ""), chosen)
             if not ok:
                 await q.answer(msg, show_alert=True)
@@ -287,6 +287,15 @@ async def handle_callback(update, context):
                 prompt = "📝 Enter PH name."
             elif st.get("action") == "clockspecialoff":
                 prompt = "📝 Enter Special Off name."
+            elif st.get("action") == "clockdos":
+                from bot.conversations import _dos_kind_and_points
+                dos_kind, dos_points = _dos_kind_and_points(chosen)
+                st["dos_kind"] = dos_kind
+                st["dos_points"] = dos_points
+                prompt = (
+                    f"🪖 DOS detected: {dos_kind} = {dos_points} point(s)\n\n"
+                    f"📝 Enter remarks (optional). Type 'nil' to skip."
+                )
             else:
                 prompt = "📝 Enter remarks (optional). Type 'nil' to skip."
 

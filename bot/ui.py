@@ -180,7 +180,7 @@ def validate_application_date(action: str, dstr: str) -> tuple[bool, str]:
     today = sg_today()
     past_365 = today - timedelta(days=365)
 
-    if action in ("clockoff", "clockphoff", "clockspecialoff", "mass", "newuser_ph"):
+    if action in ("clockoff", "clockphoff", "clockspecialoff", "clockdos", "mass", "newuser_ph"):
         if d < past_365 or d > today:
             return False, f"Date must be between {past_365} and {today}."
         return True, ""

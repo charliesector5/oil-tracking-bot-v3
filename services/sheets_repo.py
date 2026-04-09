@@ -46,6 +46,7 @@ BALANCE_HEADERS = [
     "Expired PH Off",
     "Active Special Off",
     "Expired Special Off",
+    "DOS Points",
     "Available Total",
     "Last Updated",
 ]
@@ -88,7 +89,7 @@ def _ensure_headers():
     try:
         balances_row_1 = _BALANCES_WS.row_values(1)
         if balances_row_1 != BALANCE_HEADERS:
-            _BALANCES_WS.update("A1:I1", [BALANCE_HEADERS])
+            _BALANCES_WS.update("A1:J1", [BALANCE_HEADERS])
     except Exception:
         log.exception("Failed to ensure balances headers")
         raise
@@ -190,7 +191,7 @@ def append_ledger_row(
         name or "",
         action_type,
         off_type,
-        f"{float(amount):+.1f}",
+        f"{float(amount):+.2f}",
         application_date,
         expiry_date or "",
         remarks or "",
@@ -223,6 +224,7 @@ def upsert_balance_row(
     expired_ph_off: float,
     active_special_off: float,
     expired_special_off: float,
+    dos_points: float,
     available_total: float,
 ) -> None:
     ws = get_balances_worksheet()
@@ -237,17 +239,17 @@ def upsert_balance_row(
         f"{float(expired_ph_off):.1f}",
         f"{float(active_special_off):.1f}",
         f"{float(expired_special_off):.1f}",
+        f"{float(dos_points):.1f}",
         f"{float(available_total):.1f}",
         now,
     ]
 
     for idx, row in enumerate(rows[1:], start=2):
         if len(row) > 0 and str(row[0]).strip() == str(telegram_id):
-            ws.update(f"A{idx}:I{idx}", [row_values])
+            ws.update(f"A{idx}:J{idx}", [row_values])
             return
 
     ws.append_row(row_values)
-
 
 def clear_balances_data():
     """

@@ -22,6 +22,7 @@ User Commands
 /claimphoff - claim PH OIL
 /clockspecialoff - clock Special OIL
 /claimspecialoff - claim Special OIL
+/clockdos - request DOS points using calendar date selection
 /newuser - import old OIL records for a brand-new user
 
 Admin Commands
@@ -35,6 +36,12 @@ Important Notes
 - Claim commands will show your current available balance first.
 - PH and Special claims cannot go below available active balance.
 - Normal OIL may go negative and will be flagged to admin where applicable.
+- DOS uses a point system:
+  - Weekday DOS = 1 point
+  - Weekend DOS = 2 points
+  - Singapore Public Holiday DOS = 3 points
+- Every 3 DOS points will auto-convert into 1.0 day of Normal OIL.
+- /clockdos sends a request to admins for approval before points are added.
 - Use -quit anytime during an active flow to cancel.
 
 Onboarding Notes

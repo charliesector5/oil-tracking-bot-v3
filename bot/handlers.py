@@ -6,6 +6,7 @@ from bot.conversations import (
     cmd_claimoff,
     cmd_claimphoff,
     cmd_claimspecialoff,
+    cmd_clockdos,
     cmd_clockoff,
     cmd_clockphoff,
     cmd_clockspecialoff,
@@ -25,6 +26,7 @@ from services.ledger import (
 from services.sheets_repo import get_all_rows, healthcheck, try_get_worksheet_title
 
 SEPARATOR = "────────────────────"
+MAX_MESSAGE_LEN = 3800
 
 
 async def _is_admin_in_chat(context, chat_id: int, user_id: int) -> bool:
@@ -35,12 +37,62 @@ async def _is_admin_in_chat(context, chat_id: int, user_id: int) -> bool:
         return False
 
 
+
+
+def _split_message_by_lines(text: str, max_len: int = MAX_MESSAGE_LEN) -> list[str]:
+    parts = []
+    current = ""
+
+    for line in text.splitlines(True):
+        if len(current) + len(line) <= max_len:
+            current += line
+            continue
+
+        if current.strip():
+            parts.append(current.strip())
+            current = ""
+
+        if len(line) <= max_len:
+            current = line
+            continue
+
+        start = 0
+        while start < len(line):
+            piece = line[start:start + max_len]
+            if piece.strip():
+                parts.append(piece.strip())
+            start += max_len
+
+    if current.strip():
+        parts.append(current.strip())
+
+    return parts
+
+
+def _append_block_to_chunks(chunks: list[str], block: str, max_len: int = MAX_MESSAGE_LEN) -> list[str]:
+    if not chunks:
+        chunks.append("")
+
+    if len(chunks[-1]) + len(block) <= max_len:
+        chunks[-1] += block
+        return chunks
+
+    for piece in _split_message_by_lines(block.lstrip(), max_len=max_len):
+        if len(chunks[-1]) + len(piece) + 1 <= max_len and chunks[-1].strip():
+            chunks[-1] += "\n" + piece
+        else:
+            chunks.append(piece)
+
+    return chunks
+
 def _off_type(row) -> str:
-    kind = (row.holiday_kind or "").strip().lower()
-    if kind == "special":
+    off_type = (row.off_type or "").strip().upper()
+    if off_type == "SPECIAL":
         return "Special"
-    if kind in ("yes", "y", "true", "1"):
+    if off_type == "PH":
         return "PH"
+    if off_type == "DOS":
+        return "DOS"
     return "Normal"
 
 
@@ -53,6 +105,7 @@ def _build_user_detail_block(summary, recent_rows) -> str:
         f"   ❌ Expired PH: {summary.ph_expired:.1f}",
         f"   ⭐ Active Special: {summary.special_active:.1f}",
         f"   ❌ Expired Special: {summary.special_expired:.1f}",
+        f"   🪖 DOS Points: {summary.dos_points:.1f}",
     ]
 
     if summary.normal_balance < 0:
@@ -242,6 +295,7 @@ async def cmd_summary(update, context):
         f"❌ Expired PH OIL: {s.ph_expired:.1f}",
         f"⭐ Active Special OIL: {s.special_active:.1f}",
         f"❌ Expired Special OIL: {s.special_expired:.1f}",
+        f"🪖 DOS Points: {s.dos_points:.1f}",
     ]
 
     if s.ph_active_entries:
@@ -338,7 +392,8 @@ async def cmd_overview(update, context):
             f"   🔹 Total: {s.total_balance:.1f}\n"
             f"   🔸 Normal: {s.normal_balance:.1f}\n"
             f"   🏖 PH: {s.ph_active:.1f}\n"
-            f"   ⭐ Special: {s.special_active:.1f}"
+            f"   ⭐ Special: {s.special_active:.1f}\n"
+            f"   🪖 DOS Points: {s.dos_points:.1f}"
             + (f"\n   ⚠️ Negative normal balance" if s.normal_balance < 0 else "")
         )
 
@@ -360,6 +415,8 @@ async def cmd_overview(update, context):
         await update.message.reply_text(chunk.strip(), parse_mode="Markdown")
 
 
+MAX_MESSAGE_LEN = 3500
+
 async def cmd_detailedoverview(update, context):
     chat = update.effective_chat
     if not chat or chat.type == "private":
@@ -376,25 +433,80 @@ async def cmd_detailedoverview(update, context):
         await update.message.reply_text("No records found.")
         return
 
-    header = "📋 *Detailed Sector OIL Overview*"
-    chunk = header
+    header = "📋 Detailed Sector OIL Overview"
+    batch = []
+    batch_len = len(header)
+    users_in_batch = 0
 
     for idx, s in enumerate(items, start=1):
-        recent = get_user_last_records(s.user_id, get_all_rows, limit=3)
-        block = f"\n\n{idx}) " + _build_user_detail_block(s, recent)
+        try:
+            recent = get_user_last_records(s.user_id, get_all_rows, limit=3)
+        except Exception as e:
+            print(f"get_user_last_records failed for {s.user_id}: {e}")
+            recent = []
 
-        if idx > 1:
-            block = f"\n\n{SEPARATOR}\n" + block
+        block = f"{idx}) " + _build_user_detail_block(s, recent)
 
-        if len(chunk) + len(block) > 3800:
-            await update.message.reply_text(chunk.strip(), parse_mode="Markdown")
-            chunk = block.lstrip()
+        if users_in_batch > 0:
+            block = f"\n\n{SEPARATOR}\n{block}"
+
+        projected_len = batch_len + len(block) + 2
+
+        # send current batch if next block would exceed either limit
+        if batch and (users_in_batch >= 4 or projected_len > MAX_MESSAGE_LEN):
+            await update.message.reply_text(header + "\n\n" + "".join(batch))
+            batch = []
+            batch_len = len(header)
+            users_in_batch = 0
+            block = f"{idx}) " + _build_user_detail_block(s, recent)
+
+        # if one single user block is too large, split it
+        if len(header) + 2 + len(block) > MAX_MESSAGE_LEN:
+            if batch:
+                await update.message.reply_text(header + "\n\n" + "".join(batch))
+                batch = []
+                batch_len = len(header)
+                users_in_batch = 0
+
+            parts = _split_long_text(block, MAX_MESSAGE_LEN - len(header) - 2)
+            for i, part in enumerate(parts):
+                if i == 0:
+                    await update.message.reply_text(header + "\n\n" + part)
+                else:
+                    await update.message.reply_text(part)
+            continue
+
+        batch.append(block)
+        batch_len += len(block)
+        users_in_batch += 1
+
+    if batch:
+        await update.message.reply_text(header + "\n\n" + "".join(batch))
+
+def _split_long_text(text: str, max_len: int):
+    parts = []
+    current = ""
+
+    for line in text.splitlines(True):
+        if len(current) + len(line) <= max_len:
+            current += line
         else:
-            chunk += block
+            if current:
+                parts.append(current.strip())
+                current = ""
 
-    if chunk.strip():
-        await update.message.reply_text(chunk.strip(), parse_mode="Markdown")
+            if len(line) <= max_len:
+                current = line
+            else:
+                start = 0
+                while start < len(line):
+                    parts.append(line[start:start + max_len].strip())
+                    start += max_len
 
+    if current.strip():
+        parts.append(current.strip())
+
+    return parts
 
 def register_handlers(application):
     application.add_handler(CommandHandler("start", cmd_start))
@@ -414,6 +526,7 @@ def register_handlers(application):
     application.add_handler(CommandHandler("claimphoff", cmd_claimphoff))
     application.add_handler(CommandHandler("clockspecialoff", cmd_clockspecialoff))
     application.add_handler(CommandHandler("claimspecialoff", cmd_claimspecialoff))
+    application.add_handler(CommandHandler("clockdos", cmd_clockdos))
     application.add_handler(CommandHandler("newuser", cmd_newuser))
     application.add_handler(CommandHandler("adjustoil", cmd_adjustoil))
     application.add_handler(CommandHandler("massadjustoff", cmd_massadjustoff))
